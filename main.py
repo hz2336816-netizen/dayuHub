@@ -12,11 +12,9 @@ def send_email(subject, content):
         print("未检测到 GMAIL_USER 或 GMAIL_PASS，请检查 Secrets 配置！")
         return
 
-    # 去除多余空格，确保纯净
     user = GMAIL_USER.strip()
     pwd = GMAIL_PASS.strip().replace(" ", "")
 
-    # 构建邮件
     message = MIMEText(content, 'html', 'utf-8')
     message['From'] = f"TrendBot <{user}>"
     message['To'] = user
