@@ -1,15 +1,69 @@
 import os
 import smtplib
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.header import Header
+import requests
 
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_PASS = os.getenv("GMAIL_PASS")
 
+# 敏感词简易过滤列表
+BLOCKED_KEYWORDS = ["中共", "习近平", "六四", "政治局", "台海战争", "统战"]
+
+def is_safe(text):
+    for kw in BLOCKED_KEYWORDS:
+        if kw in text:
+            return False
+    return True
+
+def fetch_google_trends():
+    """抓取 Google 实时热搜榜"""
+    url = "https://trends.google.com/trending/rss?geo=US"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    items = []
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        root = ET.fromstring(resp.content)
+        for item in root.findall(".//item"):
+            title = item.find("title").text if item.find("title") is not None else ""
+            approx_traffic = item.find("{https://trends.google.com/trending/rss}approx_traffic")
+            traffic = approx_traffic.text if approx_traffic is not None else "热度飙升"
+            if title and is_safe(title):
+                items.append(f"<b>{title}</b> <span style='color:gray;'>({traffic} 次搜索)</span>")
+            if len(items) >= 10:
+                break
+    except Exception as e:
+        items.append(f"获取 Google Trends 失败: {e}")
+    return items
+
+def fetch_youtube_trending():
+    """抓取 YouTube 全球热门视频"""
+    # 抓取全球热门频道/分类的公开更新源
+    url = "https://www.youtube.com/feeds/videos.xml?chart=mostpopular"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    items = []
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        root = ET.fromstring(resp.content)
+        # XML 命名空间处理
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        for entry in root.findall("atom:entry", ns):
+            title = entry.find("atom:title", ns).text if entry.find("atom:title", ns) is not None else ""
+            link = entry.find("atom:link", ns).attrib.get("href", "") if entry.find("atom:link", ns) is not None else ""
+            if title and is_safe(title):
+                items.append(f"<a href='{link}' style='text-decoration:none; color:#1a0dab;'><b>{title}</b></a>")
+            if len(items) >= 10:
+                break
+    except Exception as e:
+        # 备用方案：抓取前沿科技/爆款精选
+        items.append(f"获取 YouTube 实时源异常: {e}")
+    return items
+
 def send_email(subject, content):
     if not GMAIL_USER or not GMAIL_PASS:
-        print("未检测到 GMAIL_USER 或 GMAIL_PASS，请检查 Secrets 配置！")
+        print("未检测到密钥配置！")
         return
 
     user = GMAIL_USER.strip()
@@ -25,36 +79,41 @@ def send_email(subject, content):
         server.login(user, pwd)
         server.sendmail(user, [user], message.as_string())
         server.quit()
-        print("邮件已成功发送至你的 Gmail！请查收！")
+        print("最新实时简报已成功发送！")
     except Exception as e:
         print(f"邮件发送失败: {e}")
 
 def main():
     now_str = datetime.now().strftime("%Y-%m-%d")
-    subject = f"全球爆款情报与热搜 Top 10 ({now_str})"
-    
-    html_content = f"""
-    <h2>全球 Top 10 热度简报 ({now_str})</h2>
-    <p style="color: gray;">严格过滤中国政治敏感话题 | 每日早上 08:00 定时推送</p>
-    
-    <h3 style="color: #c4302b;">▶️ YouTube 全球热门视频 Top 10</h3>
-    <ol>
-        <li><b>科技新品首发深度实测</b><br>全新芯片与影像架构升级，引发全球数码圈讨论。</li>
-        <li><b>沉浸式老物机械翻新 (ASMR)</b><br>纯自然机械白噪音，无台词解压拉满完播率。</li>
-        <li><b>虚幻引擎 5 新画质技术演示</b><br>光影逼真度突破物理极限，全球游戏开发者热评。</li>
-        <li><b>极限生存挑战 100 天</b><br>强剧情冲突与实景搭建，青年群体受众裂变传播。</li>
-        <li><b>全球街头特色美食制作</b><br>超写实微距视角与诱人色泽，跨越语言的高留存爆款。</li>
-    </ol>
+    subject = f"🔥 全球实时爆款与热搜 Top 10 ({now_str})"
 
-    <h3 style="color: #4285f4;">🔍 Google 全球热搜榜 Top 10</h3>
-    <ol>
-        <li><b>国际体育重磅赛事决赛</b><br>补时绝杀逆转，全网搜索与战术讨论量破千万。</li>
-        <li><b>新一代深空探测器传回全彩图</b><br>天文学重大发现登顶多国热搜榜。</li>
-        <li><b>全球前沿 AI 生产力工具更新</b><br>多模态自动化工作流引起创作者圈层广泛关注。</li>
-    </ol>
+    print("正在抓取实时数据...")
+    yt_list = fetch_youtube_trending()
+    gt_list = fetch_google_trends()
+
+    yt_html = "".join([f"<li style='margin-bottom:8px;'>{item}</li>" for item in yt_list])
+    gt_html = "".join([f"<li style='margin-bottom:8px;'>{item}</li>" for item in gt_list])
+
+    html_content = f"""
+    <div style="max-width: 600px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6;">
+        <h2 style="color: #202124; border-bottom: 2px solid #ea4335; padding-bottom: 8px;">🌍 全球实时爆款情报 Top 10 ({now_str})</h2>
+        <p style="color: #5f6368; font-size: 13px;">自动过滤政治敏感话题 | 每日早上 08:00 定时推送</p>
+        
+        <h3 style="color: #c4302b; margin-top: 24px;">▶️ YouTube 全球热门视频</h3>
+        <ol style="padding-left: 20px;">
+            {yt_html}
+        </ol>
+
+        <h3 style="color: #1a73e8; margin-top: 24px;">🔍 Google 全球热搜飙升榜</h3>
+        <ol style="padding-left: 20px;">
+            {gt_html}
+        </ol>
+        <hr style="border: none; border-top: 1px solid #dadce0; margin-top: 30px;">
+        <p style="color: #9aa0a6; font-size: 12px; text-align: center;">由 GitHub Actions 自动化引擎提供驱动</p>
+    </div>
     """
 
-    print("开始发送每日简报邮件...")
+    print("开始发送邮件...")
     send_email(subject, html_content)
 
 if __name__ == "__main__":
