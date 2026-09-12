@@ -12,11 +12,12 @@ def send_email(subject, content):
         print("未检测到 GMAIL_USER 或 GMAIL_PASS，请检查 Secrets 配置！")
         return
 
+    # 去除多余空格，确保纯净
     user = GMAIL_USER.strip()
     pwd = GMAIL_PASS.strip().replace(" ", "")
 
+    # 构建邮件
     message = MIMEText(content, 'html', 'utf-8')
-    # 彻底避开 ASCII 编码问题
     message['From'] = f"TrendBot <{user}>"
     message['To'] = user
     message['Subject'] = Header(subject, 'utf-8')
@@ -40,7 +41,7 @@ def main():
     
     <h3 style="color: #c4302b;">▶️ YouTube 全球热门视频 Top 10</h3>
     <ol>
-        <li><b>科技新品首发深度实测</b><br>全新芯片与影像架构升级，引发全球数码圈激烈讨论。</li>
+        <li><b>科技新品首发深度实测</b><br>全新芯片与影像架构升级，引发全球数码圈讨论。</li>
         <li><b>沉浸式老物机械翻新 (ASMR)</b><br>纯自然机械白噪音，无台词解压拉满完播率。</li>
         <li><b>虚幻引擎 5 新画质技术演示</b><br>光影逼真度突破物理极限，全球游戏开发者热评。</li>
         <li><b>极限生存挑战 100 天</b><br>强剧情冲突与实景搭建，青年群体受众裂变传播。</li>
