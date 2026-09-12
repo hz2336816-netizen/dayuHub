@@ -2,7 +2,7 @@ import os
 import smtplib
 from datetime import datetime
 from email.mime.text import MIMEText
-from email.header import Header
+from email.utils import formataddr
 
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_PASS = os.getenv("GMAIL_PASS")
@@ -12,17 +12,20 @@ def send_email(subject, content):
         print("未检测到 GMAIL_USER 或 GMAIL_PASS，请检查 Secrets 配置！")
         return
 
+    # 去除首尾多余空格
+    user = GMAIL_USER.strip()
+    pwd = GMAIL_PASS.strip()
+
     # 构建 HTML 邮件内容
     message = MIMEText(content, 'html', 'utf-8')
-    message['From'] = Header(f"全球爆款情报助手 <{GMAIL_USER}>", 'utf-8')
-    message['To'] = Header(GMAIL_USER, 'utf-8')
-    message['Subject'] = Header(subject, 'utf-8')
+    message['From'] = formataddr(('TrendBriefing', user))
+    message['To'] = user
+    message['Subject'] = subject
 
     try:
-        # 使用 Gmail SSL 465 端口发送
         server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
-        server.login(GMAIL_USER, GMAIL_PASS)
-        server.sendmail(GMAIL_USER, [GMAIL_USER], message.as_string())
+        server.login(user, pwd)
+        server.sendmail(user, [user], message.as_string())
         server.quit()
         print("邮件已成功发送至你的 Gmail！请查收！")
     except Exception as e:
@@ -30,10 +33,10 @@ def send_email(subject, content):
 
 def main():
     now_str = datetime.now().strftime("%Y-%m-%d")
-    subject = f"📅 全球爆款情报与热搜 Top 10 ({now_str})"
+    subject = f"全球爆款情报与热搜 Top 10 ({now_str})"
     
     html_content = f"""
-    <h2>📅 全球 Top 10 热度简报 ({now_str})</h2>
+    <h2>全球 Top 10 热度简报 ({now_str})</h2>
     <p style="color: gray;">严格过滤中国政治敏感话题 | 每日早上 08:00 定时推送</p>
     
     <h3 style="color: #c4302b;">▶️ YouTube 全球热门视频 Top 10</h3>
