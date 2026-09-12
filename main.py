@@ -1,4 +1,6 @@
 import os
+import re
+import json
 import smtplib
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -9,7 +11,6 @@ import requests
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_PASS = os.getenv("GMAIL_PASS")
 
-# 敏感词简易过滤列表
 BLOCKED_KEYWORDS = ["中共", "习近平", "六四", "政治局", "台海战争", "统战"]
 
 def is_safe(text):
@@ -21,7 +22,7 @@ def is_safe(text):
 def fetch_google_trends():
     """抓取 Google 实时热搜榜"""
     url = "https://trends.google.com/trending/rss?geo=US"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     items = []
     try:
         resp = requests.get(url, headers=headers, timeout=10)
@@ -29,7 +30,7 @@ def fetch_google_trends():
         for item in root.findall(".//item"):
             title = item.find("title").text if item.find("title") is not None else ""
             approx_traffic = item.find("{https://trends.google.com/trending/rss}approx_traffic")
-            traffic = approx_traffic.text if approx_traffic is not None else "热度飙升"
+            traffic = approx_traffic.text if approx_traffic is not None else "飙升"
             if title and is_safe(title):
                 items.append(f"<b>{title}</b> <span style='color:gray;'>({traffic} 次搜索)</span>")
             if len(items) >= 10:
@@ -39,26 +40,58 @@ def fetch_google_trends():
     return items
 
 def fetch_youtube_trending():
-    """抓取 YouTube 全球热门视频"""
-    # 抓取全球热门频道/分类的公开更新源
-    url = "https://www.youtube.com/feeds/videos.xml?chart=mostpopular"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    """抓取 YouTube 全球热门视频（解析前端渲染数据）"""
+    url = "https://www.youtube.com/feed/trending?persist_hl=1&hl=en"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9"
+    }
     items = []
     try:
-        resp = requests.get(url, headers=headers, timeout=10)
-        root = ET.fromstring(resp.content)
-        # XML 命名空间处理
-        ns = {"atom": "http://www.w3.org/2005/Atom"}
-        for entry in root.findall("atom:entry", ns):
-            title = entry.find("atom:title", ns).text if entry.find("atom:title", ns) is not None else ""
-            link = entry.find("atom:link", ns).attrib.get("href", "") if entry.find("atom:link", ns) is not None else ""
-            if title and is_safe(title):
-                items.append(f"<a href='{link}' style='text-decoration:none; color:#1a0dab;'><b>{title}</b></a>")
-            if len(items) >= 10:
-                break
+        resp = requests.get(url, headers=headers, timeout=12)
+        match = re.search(r'var ytInitialData = ({.*?});</script>', resp.text)
+        if match:
+            data = json.loads(match.group(1))
+            tabs = data.get("contents", {}).get("twoColumnBrowseResultsRenderer", {}).get("tabs", [])
+            tab_content = tabs[0].get("tabRenderer", {}).get("content", {}) if tabs else {}
+            section_list = tab_content.get("sectionListRenderer", {}).get("contents", [])
+            
+            for section in section_list:
+                item_section = section.get("itemSectionRenderer", {}).get("contents", [])
+                for content in item_section:
+                    shelf = content.get("shelfRenderer", {}).get("content", {})
+                    expanded_shelf = shelf.get("expandedShelfContentsRenderer", {}).get("items", [])
+                    for video in expanded_shelf:
+                        renderer = video.get("videoRenderer", {})
+                        title_runs = renderer.get("title", {}).get("runs", [])
+                        title = title_runs[0].get("text", "") if title_runs else ""
+                        video_id = renderer.get("videoId", "")
+                        
+                        if title and video_id and is_safe(title):
+                            link = f"https://www.youtube.com/watch?v={video_id}"
+                            items.append(f"<a href='{link}' style='text-decoration:none; color:#1a0dab;'><b>{title}</b></a>")
+                        if len(items) >= 10:
+                            break
+                    if len(items) >= 10:
+                        break
+                if len(items) >= 10:
+                    break
+
+        # 保底机制：若正则提取受限，抓取官方精选热榜
+        if not items:
+            backup_url = "https://www.youtube.com/feeds/videos.xml?channel_id=UCF0pVplsI8R5kcAqgtoRqoA"
+            b_resp = requests.get(backup_url, headers=headers, timeout=10)
+            b_root = ET.fromstring(b_resp.content)
+            ns = {"atom": "http://www.w3.org/2005/Atom"}
+            for entry in b_root.findall("atom:entry", ns):
+                title = entry.find("atom:title", ns).text if entry.find("atom:title", ns) is not None else ""
+                link = entry.find("atom:link", ns).attrib.get("href", "") if entry.find("atom:link", ns) is not None else ""
+                if title and is_safe(title):
+                    items.append(f"<a href='{link}' style='text-decoration:none; color:#1a0dab;'><b>{title}</b></a>")
+                if len(items) >= 10:
+                    break
     except Exception as e:
-        # 备用方案：抓取前沿科技/爆款精选
-        items.append(f"获取 YouTube 实时源异常: {e}")
+        items.append(f"获取 YouTube 异常: {e}")
     return items
 
 def send_email(subject, content):
