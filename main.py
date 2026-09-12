@@ -8,6 +8,7 @@ import requests
 
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_PASS = os.getenv("GMAIL_PASS")
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 BLOCKED_KEYWORDS = ["中共", "习近平", "六四", "政治局", "台海战争", "统战"]
 
@@ -34,49 +35,53 @@ def fetch_google_trends():
             if len(items) >= 10:
                 break
     except Exception as e:
-        items.append(f"Google Trends 抓取稍后重试: {e}")
+        items.append(f"Google Trends 获取异常: {e}")
     return items
 
 def fetch_youtube_trending():
-    """使用免 Key 镜像 API 抓取 YouTube 全球热门视频"""
-    # 多个备用节点，确保 100% 成功
-    nodes = [
-        "https://inv.tux.pizza",
-        "https://invidious.nerdvpn.de",
-        "https://yt.artemislena.eu"
-    ]
-    items = []
-    for node in nodes:
-        try:
-            api_url = f"{node}/api/v1/trending?region=US"
-            resp = requests.get(api_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
-            if resp.status_code == 200:
-                data = resp.json()
-                for vid in data:
-                    title = vid.get("title", "")
-                    video_id = vid.get("videoId", "")
-                    view_count = vid.get("viewCount", 0)
-                    if title and video_id and is_safe(title):
-                        views_w = round(view_count / 10000, 1) if view_count else 0
-                        views_tag = f" <span style='color:gray;'>({views_w}万次播放)</span>" if views_w else ""
-                        link = f"https://www.youtube.com/watch?v={video_id}"
-                        items.append(f"<a href='{link}' style='text-decoration:none; color:#1a0dab;'><b>{title}</b></a>{views_tag}")
-                    if len(items) >= 10:
-                        break
-            if items:
-                break
-        except Exception:
-            continue
+    """使用官方 YouTube Data API v3 获取全球热门视频"""
+    if not YOUTUBE_API_KEY:
+        return ["未检测到 YOUTUBE_API_KEY，请检查 Secrets 配置！"]
 
-    if not items:
-        items.append("YouTube 实时接口响应延迟，请等待下次定时轮询")
+    url = "https://www.googleapis.com/youtube/v3/videos"
+    params = {
+        "part": "snippet,statistics",
+        "chart": "mostPopular",
+        "regionCode": "US",
+        "maxResults": 15,
+        "key": YOUTUBE_API_KEY.strip()
+    }
+    items = []
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        data = resp.json()
+        
+        if "error" in data:
+            return [f"API 响应错误: {data['error'].get('message', '未知错误')}"]
+
+        for video in data.get("items", []):
+            snippet = video.get("snippet", {})
+            title = snippet.get("title", "")
+            channel = snippet.get("channelTitle", "")
+            video_id = video.get("id", "")
+            view_count = int(video.get("statistics", {}).get("viewCount", 0))
+
+            if title and video_id and is_safe(title):
+                views_w = round(view_count / 10000, 1) if view_count else 0
+                views_tag = f" <span style='color:gray;'>({views_w}万次播放 · {channel})</span>" if views_w else ""
+                link = f"https://www.youtube.com/watch?v={video_id}"
+                items.append(f"<a href='{link}' style='text-decoration:none; color:#1a0dab;'><b>{title}</b></a>{views_tag}")
+            
+            if len(items) >= 10:
+                break
+    except Exception as e:
+        items.append(f"请求官方 YouTube API 异常: {e}")
+
     return items
 
 def send_email(subject, content):
     if not GMAIL_USER or not GMAIL_PASS:
-        print("未检测到密钥配置！")
         return
-
     user = GMAIL_USER.strip()
     pwd = GMAIL_PASS.strip().replace(" ", "")
 
@@ -90,7 +95,7 @@ def send_email(subject, content):
         server.login(user, pwd)
         server.sendmail(user, [user], message.as_string())
         server.quit()
-        print("邮件发送成功！")
+        print("邮件已成功发送至 Gmail！")
     except Exception as e:
         print(f"邮件发送失败: {e}")
 
@@ -98,7 +103,6 @@ def main():
     now_str = datetime.now().strftime("%Y-%m-%d")
     subject = f"🔥 全球实时爆款情报与热搜 Top 10 ({now_str})"
 
-    print("开始抓取实时数据...")
     yt_list = fetch_youtube_trending()
     gt_list = fetch_google_trends()
 
@@ -108,7 +112,7 @@ def main():
     html_content = f"""
     <div style="max-width: 600px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6;">
         <h2 style="color: #202124; border-bottom: 2px solid #ea4335; padding-bottom: 8px;">🌍 全球实时爆款情报 Top 10 ({now_str})</h2>
-        <p style="color: #5f6368; font-size: 13px;">自动过滤政治敏感话题 | 每日早上 08:00 定时自动推送</p>
+        <p style="color: #5f6368; font-size: 13px;">自动过滤政治敏感话题 | 每日早上 08:00 定时推送</p>
         
         <h3 style="color: #c4302b; margin-top: 24px;">▶️ YouTube 全球热门视频 Top 10</h3>
         <ol style="padding-left: 20px;">
@@ -124,7 +128,6 @@ def main():
     </div>
     """
 
-    print("正在发送邮件...")
     send_email(subject, html_content)
 
 if __name__ == "__main__":
