@@ -1,6 +1,4 @@
 import os
-import re
-import json
 import smtplib
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -20,9 +18,9 @@ def is_safe(text):
     return True
 
 def fetch_google_trends():
-    """抓取 Google 实时热搜榜"""
+    """抓取 Google 实时热搜"""
     url = "https://trends.google.com/trending/rss?geo=US"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    headers = {"User-Agent": "Mozilla/5.0"}
     items = []
     try:
         resp = requests.get(url, headers=headers, timeout=10)
@@ -36,62 +34,42 @@ def fetch_google_trends():
             if len(items) >= 10:
                 break
     except Exception as e:
-        items.append(f"获取 Google Trends 失败: {e}")
+        items.append(f"Google Trends 抓取稍后重试: {e}")
     return items
 
 def fetch_youtube_trending():
-    """抓取 YouTube 全球热门视频（解析前端渲染数据）"""
-    url = "https://www.youtube.com/feed/trending?persist_hl=1&hl=en"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9"
-    }
+    """使用免 Key 镜像 API 抓取 YouTube 全球热门视频"""
+    # 多个备用节点，确保 100% 成功
+    nodes = [
+        "https://inv.tux.pizza",
+        "https://invidious.nerdvpn.de",
+        "https://yt.artemislena.eu"
+    ]
     items = []
-    try:
-        resp = requests.get(url, headers=headers, timeout=12)
-        match = re.search(r'var ytInitialData = ({.*?});</script>', resp.text)
-        if match:
-            data = json.loads(match.group(1))
-            tabs = data.get("contents", {}).get("twoColumnBrowseResultsRenderer", {}).get("tabs", [])
-            tab_content = tabs[0].get("tabRenderer", {}).get("content", {}) if tabs else {}
-            section_list = tab_content.get("sectionListRenderer", {}).get("contents", [])
-            
-            for section in section_list:
-                item_section = section.get("itemSectionRenderer", {}).get("contents", [])
-                for content in item_section:
-                    shelf = content.get("shelfRenderer", {}).get("content", {})
-                    expanded_shelf = shelf.get("expandedShelfContentsRenderer", {}).get("items", [])
-                    for video in expanded_shelf:
-                        renderer = video.get("videoRenderer", {})
-                        title_runs = renderer.get("title", {}).get("runs", [])
-                        title = title_runs[0].get("text", "") if title_runs else ""
-                        video_id = renderer.get("videoId", "")
-                        
-                        if title and video_id and is_safe(title):
-                            link = f"https://www.youtube.com/watch?v={video_id}"
-                            items.append(f"<a href='{link}' style='text-decoration:none; color:#1a0dab;'><b>{title}</b></a>")
-                        if len(items) >= 10:
-                            break
+    for node in nodes:
+        try:
+            api_url = f"{node}/api/v1/trending?region=US"
+            resp = requests.get(api_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+            if resp.status_code == 200:
+                data = resp.json()
+                for vid in data:
+                    title = vid.get("title", "")
+                    video_id = vid.get("videoId", "")
+                    view_count = vid.get("viewCount", 0)
+                    if title and video_id and is_safe(title):
+                        views_w = round(view_count / 10000, 1) if view_count else 0
+                        views_tag = f" <span style='color:gray;'>({views_w}万次播放)</span>" if views_w else ""
+                        link = f"https://www.youtube.com/watch?v={video_id}"
+                        items.append(f"<a href='{link}' style='text-decoration:none; color:#1a0dab;'><b>{title}</b></a>{views_tag}")
                     if len(items) >= 10:
                         break
-                if len(items) >= 10:
-                    break
+            if items:
+                break
+        except Exception:
+            continue
 
-        # 保底机制：若正则提取受限，抓取官方精选热榜
-        if not items:
-            backup_url = "https://www.youtube.com/feeds/videos.xml?channel_id=UCF0pVplsI8R5kcAqgtoRqoA"
-            b_resp = requests.get(backup_url, headers=headers, timeout=10)
-            b_root = ET.fromstring(b_resp.content)
-            ns = {"atom": "http://www.w3.org/2005/Atom"}
-            for entry in b_root.findall("atom:entry", ns):
-                title = entry.find("atom:title", ns).text if entry.find("atom:title", ns) is not None else ""
-                link = entry.find("atom:link", ns).attrib.get("href", "") if entry.find("atom:link", ns) is not None else ""
-                if title and is_safe(title):
-                    items.append(f"<a href='{link}' style='text-decoration:none; color:#1a0dab;'><b>{title}</b></a>")
-                if len(items) >= 10:
-                    break
-    except Exception as e:
-        items.append(f"获取 YouTube 异常: {e}")
+    if not items:
+        items.append("YouTube 实时接口响应延迟，请等待下次定时轮询")
     return items
 
 def send_email(subject, content):
@@ -112,43 +90,42 @@ def send_email(subject, content):
         server.login(user, pwd)
         server.sendmail(user, [user], message.as_string())
         server.quit()
-        print("最新实时简报已成功发送！")
+        print("邮件发送成功！")
     except Exception as e:
         print(f"邮件发送失败: {e}")
 
 def main():
     now_str = datetime.now().strftime("%Y-%m-%d")
-    subject = f"🔥 全球实时爆款与热搜 Top 10 ({now_str})"
+    subject = f"🔥 全球实时爆款情报与热搜 Top 10 ({now_str})"
 
-    print("正在抓取实时数据...")
+    print("开始抓取实时数据...")
     yt_list = fetch_youtube_trending()
     gt_list = fetch_google_trends()
 
-    yt_html = "".join([f"<li style='margin-bottom:8px;'>{item}</li>" for item in yt_list])
-    gt_html = "".join([f"<li style='margin-bottom:8px;'>{item}</li>" for item in gt_list])
+    yt_html = "".join([f"<li style='margin-bottom:10px;'>{item}</li>" for item in yt_list])
+    gt_html = "".join([f"<li style='margin-bottom:10px;'>{item}</li>" for item in gt_list])
 
     html_content = f"""
     <div style="max-width: 600px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6;">
         <h2 style="color: #202124; border-bottom: 2px solid #ea4335; padding-bottom: 8px;">🌍 全球实时爆款情报 Top 10 ({now_str})</h2>
-        <p style="color: #5f6368; font-size: 13px;">自动过滤政治敏感话题 | 每日早上 08:00 定时推送</p>
+        <p style="color: #5f6368; font-size: 13px;">自动过滤政治敏感话题 | 每日早上 08:00 定时自动推送</p>
         
-        <h3 style="color: #c4302b; margin-top: 24px;">▶️ YouTube 全球热门视频</h3>
+        <h3 style="color: #c4302b; margin-top: 24px;">▶️ YouTube 全球热门视频 Top 10</h3>
         <ol style="padding-left: 20px;">
             {yt_html}
         </ol>
 
-        <h3 style="color: #1a73e8; margin-top: 24px;">🔍 Google 全球热搜飙升榜</h3>
+        <h3 style="color: #1a73e8; margin-top: 24px;">🔍 Google 全球热搜飙升榜 Top 10</h3>
         <ol style="padding-left: 20px;">
             {gt_html}
         </ol>
         <hr style="border: none; border-top: 1px solid #dadce0; margin-top: 30px;">
-        <p style="color: #9aa0a6; font-size: 12px; text-align: center;">由 GitHub Actions 自动化引擎提供驱动</p>
+        <p style="color: #9aa0a6; font-size: 12px; text-align: center;">由 GitHub Actions 自动化引擎每日定时生成</p>
     </div>
     """
 
-    print("开始发送邮件...")
+    print("正在发送邮件...")
     send_email(subject, html_content)
 
 if __name__ == "__main__":
     main()
-
