@@ -23,5 +23,6 @@ jobs:
 
       - name: 运行脚本
         env:
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_PASS: ${{ secrets.GMAIL_PASS }}
         run: python main.py
