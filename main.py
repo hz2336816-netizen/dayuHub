@@ -10,7 +10,7 @@ GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_PASS = os.getenv("GMAIL_PASS")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-BLOCKED_KEYWORDS = ["中共", "习近平", "六四", "政治局", "台海战争", "统战"]
+BLOCKED_KEYWORDS = ["中共", "习近平", "六四", "政治局", "台海战争", "统战", "民进党", "国民党", "赖清德", "柯文哲"]
 
 def is_safe(text):
     for kw in BLOCKED_KEYWORDS:
@@ -19,8 +19,8 @@ def is_safe(text):
     return True
 
 def fetch_google_trends():
-    """抓取 Google 实时热搜"""
-    url = "https://trends.google.com/trending/rss?geo=US"
+    """抓取华语区（香港/台湾）实时搜索热榜"""
+    url = "https://trends.google.com/trending/rss?geo=HK"
     headers = {"User-Agent": "Mozilla/5.0"}
     items = []
     try:
@@ -35,20 +35,21 @@ def fetch_google_trends():
             if len(items) >= 10:
                 break
     except Exception as e:
-        items.append(f"Google Trends 获取异常: {e}")
+        items.append(f"获取 Google 趋势异常: {e}")
     return items
 
 def fetch_youtube_trending():
-    """使用官方 YouTube Data API v3 获取全球热门视频"""
+    """使用官方 API 抓取华语区热门中文视频"""
     if not YOUTUBE_API_KEY:
-        return ["未检测到 YOUTUBE_API_KEY，请检查 Secrets 配置！"]
+        return ["未检测到 YOUTUBE_API_KEY，请检查配置！"]
 
     url = "https://www.googleapis.com/youtube/v3/videos"
     params = {
         "part": "snippet,statistics",
         "chart": "mostPopular",
-        "regionCode": "US",
-        "maxResults": 15,
+        "regionCode": "TW",
+        "hl": "zh-CN",
+        "maxResults": 20,
         "key": YOUTUBE_API_KEY.strip()
     }
     items = []
@@ -95,13 +96,13 @@ def send_email(subject, content):
         server.login(user, pwd)
         server.sendmail(user, [user], message.as_string())
         server.quit()
-        print("邮件已成功发送至 Gmail！")
+        print("邮件发送成功！")
     except Exception as e:
         print(f"邮件发送失败: {e}")
 
 def main():
     now_str = datetime.now().strftime("%Y-%m-%d")
-    subject = f"🔥 全球实时爆款情报与热搜 Top 10 ({now_str})"
+    subject = f"🔥 每日中文热门视频与热搜 Top 10 ({now_str})"
 
     yt_list = fetch_youtube_trending()
     gt_list = fetch_google_trends()
@@ -110,16 +111,16 @@ def main():
     gt_html = "".join([f"<li style='margin-bottom:10px;'>{item}</li>" for item in gt_list])
 
     html_content = f"""
-    <div style="max-width: 600px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6;">
-        <h2 style="color: #202124; border-bottom: 2px solid #ea4335; padding-bottom: 8px;">🌍 全球实时爆款情报 Top 10 ({now_str})</h2>
-        <p style="color: #5f6368; font-size: 13px;">自动过滤政治敏感话题 | 每日早上 08:00 定时推送</p>
+    <div style="max-width: 600px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; line-height: 1.6;">
+        <h2 style="color: #202124; border-bottom: 2px solid #ea4335; padding-bottom: 8px;">🌍 全球热门与搜索中文简报 ({now_str})</h2>
+        <p style="color: #5f6368; font-size: 13px;">自动过滤政治敏感话题 | 每日早上 08:25 定时推送</p>
         
-        <h3 style="color: #c4302b; margin-top: 24px;">▶️ YouTube 全球热门视频 Top 10</h3>
+        <h3 style="color: #c4302b; margin-top: 24px;">▶️ YouTube 热门视频 Top 10</h3>
         <ol style="padding-left: 20px;">
             {yt_html}
         </ol>
 
-        <h3 style="color: #1a73e8; margin-top: 24px;">🔍 Google 全球热搜飙升榜 Top 10</h3>
+        <h3 style="color: #1a73e8; margin-top: 24px;">🔍 Google 热门搜索 Top 10</h3>
         <ol style="padding-left: 20px;">
             {gt_html}
         </ol>
